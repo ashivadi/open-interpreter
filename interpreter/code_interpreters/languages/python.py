@@ -1,37 +1,48 @@
-import os
-import sys
-from ..subprocess_code_interpreter import SubprocessCodeInterpreter
+# Subprocess based
+
 import ast
+import os
 import re
 import shlex
+import sys
+
+from ..subprocess_code_interpreter import SubprocessCodeInterpreter
+from .python_vision import PythonVision
+
 
 class Python(SubprocessCodeInterpreter):
     file_extension = "py"
     proper_name = "Python"
 
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
-        executable = sys.executable
-        if os.name != 'nt':  # not Windows
-            executable = shlex.quote(executable)
-        self.start_cmd = executable + " -i -q -u"
-        
+        self.config = config
+
+        if config["vision"]:
+            self.__class__ = PythonVision
+            self.__init__(config)
+        else:
+            executable = sys.executable
+            if os.name != "nt":  # not Windows
+                executable = shlex.quote(executable)
+            self.start_cmd = executable + " -i -q -u"
+
     def preprocess_code(self, code):
         return preprocess_python(code)
-    
+
     def line_postprocessor(self, line):
-        if re.match(r'^(\s*>>>\s*|\s*\.\.\.\s*)', line):
+        if re.match(r"^(\s*>>>\s*|\s*\.\.\.\s*)", line):
             return None
         return line
 
     def detect_active_line(self, line):
-        if "## active_line " in line:
-            return int(line.split("## active_line ")[1].split(" ##")[0])
+        if "##active_line" in line:
+            return int(line.split("##active_line")[1].split("##")[0])
         return None
 
     def detect_end_of_execution(self, line):
-        return "## end_of_execution ##" in line
-    
+        return "##end_of_execution##" in line
+
 
 def preprocess_python(code):
     """
@@ -53,7 +64,7 @@ def preprocess_python(code):
     code = "\n".join(code_lines)
 
     # Add end command (we'll be listening for this so we know when it ends)
-    code += '\n\nprint("## end_of_execution ##")'
+    code += '\n\nprint("##end_of_execution##")'
 
     return code
 
@@ -78,9 +89,9 @@ class AddLinePrints(ast.NodeTransformer):
         """Inserts a print statement for a given line number."""
         return ast.Expr(
             value=ast.Call(
-                func=ast.Name(id='print', ctx=ast.Load()),
-                args=[ast.Constant(value=f"## active_line {line_number} ##")],
-                keywords=[]
+                func=ast.Name(id="print", ctx=ast.Load()),
+                args=[ast.Constant(value=f"##active_line{line_number}##")],
+                keywords=[],
             )
         )
 
@@ -93,7 +104,7 @@ class AddLinePrints(ast.NodeTransformer):
             body = [body]
 
         for sub_node in body:
-            if hasattr(sub_node, 'lineno'):
+            if hasattr(sub_node, "lineno"):
                 new_body.append(self.insert_print_statement(sub_node.lineno))
             new_body.append(sub_node)
 
@@ -104,11 +115,11 @@ class AddLinePrints(ast.NodeTransformer):
         new_node = super().visit(node)
 
         # If node has a body, process it
-        if hasattr(new_node, 'body'):
+        if hasattr(new_node, "body"):
             new_node.body = self.process_body(new_node.body)
 
         # If node has an orelse block (like in for, while, if), process it
-        if hasattr(new_node, 'orelse') and new_node.orelse:
+        if hasattr(new_node, "orelse") and new_node.orelse:
             new_node.orelse = self.process_body(new_node.orelse)
 
         # Special case for Try nodes as they have multiple blocks
@@ -119,7 +130,7 @@ class AddLinePrints(ast.NodeTransformer):
                 new_node.finalbody = self.process_body(new_node.finalbody)
 
         return new_node
-    
+
 
 def wrap_in_try_except(code):
     # Add import traceback
@@ -138,16 +149,20 @@ def wrap_in_try_except(code):
                 body=[
                     ast.Expr(
                         value=ast.Call(
-                            func=ast.Attribute(value=ast.Name(id="traceback", ctx=ast.Load()), attr="print_exc", ctx=ast.Load()),
+                            func=ast.Attribute(
+                                value=ast.Name(id="traceback", ctx=ast.Load()),
+                                attr="print_exc",
+                                ctx=ast.Load(),
+                            ),
                             args=[],
-                            keywords=[]
+                            keywords=[],
                         )
                     ),
-                ]
+                ],
             )
         ],
         orelse=[],
-        finalbody=[]
+        finalbody=[],
     )
 
     # Assign the try-except block as the new body
