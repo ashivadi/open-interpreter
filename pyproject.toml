@@ -28,6 +28,7 @@ tiktoken = "^0.4.0"
 tokentrim = "^0.1.9"
 wget = "^3.2"
 yaspin = "^3.0.1"
+boto3 = "^1.28.57"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
